@@ -1,0 +1,8 @@
+EGA Dataset Accession ID,Patient,Sample,age_at_sample_years,Assay_type,Sample_source,Matched_sample
+EGAD00001016068,PD63423,PD63423b_ds0001,64,nanoseq neat bulk,Buccal,NA
+EGAD00001016068,PD63423,PD63423d_ds0001,75,nanoseq,normal skin,PD63423b_ds0001
+EGAD00001016068,PD63423,PD63423d_ds0002,75,nanoseq,normal skin,PD63423b_ds0001
+EGAD00001016068,PD63423,PD63423d_ds0003,75,nanoseq,normal skin,PD63423b_ds0001
+EGAD00001016068,PD63423,PD63423d_ds0004,75,nanoseq,normal skin,PD63423b_ds0001
+EGAD00001016068,PD63423,PD63423d_ds0005,75,nanoseq,normal skin,PD63423b_ds0001
+EGAD00001016068,PD63423,PD63423d_ds0006,75,nanoseq,normal skin,PD63423b_ds0001
