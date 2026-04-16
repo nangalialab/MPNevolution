@@ -1,1 +1,3 @@
 Code related to ...
+
+Manifests for samples deposited in EGA are located in "data/EGA_manifests"
