@@ -1,0 +1,384 @@
+---
+title: "MPN bulk WGS n30 - SNV signature analysis"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: yes
+    toc_depth: 3
+    theme: lumen
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+params:
+  code: TRUE
+---
+
+# Aim
+
+This analysis is to explore the SNV mutational signatures in the bulk WGS MPN cohort (n30)
+
+# 0. Setup
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = params$code)
+knitr::opts_chunk$set(message = params$code)
+knitr::opts_chunk$set(warning = params$code)
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## a. Set ref genome
+```{r}
+SPECIES = "Hsapiens"
+SPECIES_BUILD="hg19"
+```
+
+## b. Load libraries
+```{r, message=FALSE,error=FALSE,results=FALSE}
+knitr::opts_chunk$set(collapse = TRUE)
+
+library("BSgenome.Hsapiens.UCSC.hg19")
+
+library("tidyverse")
+library("ggrepel")
+library("parallel")
+library("magrittr")
+library("patchwork")
+
+source("revised_sigs.R")
+source("contribution.plot.R")
+
+theme_set(theme_bw())
+```
+
+## c. Custom functions
+```{r}
+  addTotal <-
+    function(df) {
+      df %>%
+        mutate(across(where(is.logical), as.character)) %>%
+        bind_rows(summarise(., across(where(is.numeric), ~ sum(.x, na.rm = T)), 
+                            across(where(is.character), ~ "Total")))
+    }
+```
+
+## d. Create signature catalogue 
+Use COSMIC_v3.2_SBS_GRCh37.txt and add SBSblood from Machado et al. 2022 https://doi.org/10.1038/s41586-022-05072-7
+```{r}
+pcawg <- get_pcawg60()
+pcawg.row.names <- row.names(pcawg)
+# SBSblood signature from Table S8 Machado et al. 2022
+lym <- read.table("lympho_sbs_sigs.txt", head = T, stringsAsFactors = FALSE)
+pcawg <- cbind(pcawg, SBSblood = lym[, "SBSblood"])
+
+pcawg <- apply(pcawg, MARGIN = 2, as.numeric)
+row.names(pcawg) <- pcawg.row.names
+```
+
+
+## e. Data
+### i. Clone_driver.key.n104
+Clone-level metadata for 104 clones inferred by dpclust for the 30 MPN patients in the bulk WGS cohort.
+```{r}
+clone_driver.key.n104 <- read_csv("20260410_clone_driver.key.n104.csv")
+```
+#### 1) Summary
+```{r}
+clone_driver.key.n104 %>%
+  group_by(Patient, category_label) %>%
+  summarise(clone_tot = length(cluster_no), HQ.clone_tot = sum(In.vignette == TRUE, na.rm = T), .groups = "drop") %>%
+  arrange(desc(category_label)) %>% addTotal()
+```
+
+#### 2) Add Patient x cluster name
+```{r}
+clone_driver.key.n104 %<>%  mutate(cluster_name = paste0(Patient, "_", cluster_no))
+```
+
+#### 3) Check for multiple clones within the same patient
+PD4775 & PD4947 have multiple 9pLOH containing clones
+```{r}
+clone_driver.key.n104 %>% filter(!is.na(Clone_abv)) %>% group_by(Patient) %>%  count(Clone_abv) %>%  filter(n>1)
+```
+
+
+```{r}
+clone_driver.key.n104 %>% filter(Patient  %in% c("PD4775", "PD4947"))
+```
+
+##### i) Add cluster_no suffix to 9pLOH only clones 
+```{r}
+clone_driver.key.n104 %>%
+  mutate(Clone_abv = case_when(cluster_name %in% c("PD4775_cl3", "PD4775_cl4", "PD4947_cl5", "PD4947_cl6") & Clone_abv == "9pLOH" ~ paste0(Clone_abv, ".", cluster_no), TRUE ~ Clone_abv)) %>%
+  filter(Patient  %in% c("PD4775", "PD4947"))
+```
+
+```{r}
+clone_driver.key.n104 %<>%
+  mutate(Clone_abv = case_when(cluster_name %in% c("PD4775_cl3", "PD4775_cl4", "PD4947_cl5", "PD4947_cl6") & Clone_abv == "9pLOH" ~ paste0(Clone_abv, "_", cluster_no), TRUE ~ Clone_abv)) 
+```
+
+
+
+### ii. 96-context mutation matrix n104
+96-context mutation matrix for 104 clones inferred by dpclust for the 30 MPN patients in the bulk WGS cohort.
+```{r}
+mut_mat <- read.delim("dp.best.cl.n104.mat.csv", sep = ",")
+```
+
+##### 1) Check cluster names match with clone_driver.key
+```{r}
+table(colnames(mut_mat)  %in%  clone_driver.key.n104$cluster_name)
+```
+
+
+# 1. Run HDP
+## a. Subset matrix (96 x 64/104)
+Subset matrix to clones in vignettes and greater than 50 mutations
+```{r}
+mat.name = "current.gt50"
+mc2 <- mut_mat[,colSums(mut_mat)>50 & colnames(mut_mat)  %in%  (clone_driver.key.n104 %>% filter(In.vignette) %>%  .$cluster_name)]
+
+dim(mc2)
+```
+
+## b. Run HDP
+### i. Setup
+```{r}
+multi.types <- gsub("_.*", "", colnames(mc2))
+
+write.table(mc2, file = paste0(mat.name, ".mat.csv"), quote = FALSE, row.names = FALSE, col.names = TRUE, sep = ",")
+hash <- digest::digest(list(read.table(paste0(mat.name, ".mat.csv")), multi.types))
+```
+
+### ii. Run
+Run hdp with burnin=10000, spacing=500 and n_per_chain=250.
+```{r}
+hdpsave=sprintf("hdp_%s.RDS",hash)
+
+if(file.exists(hdpsave)){
+  hdpres2=readRDS(hdpsave)
+}else{
+  hdpres2=runHDP_denovo(as.data.frame((mc2)))
+  saveRDS(hdpres2,file=hdpsave)
+}
+```
+
+### iii. Chain QC
+```{r}
+    par(mfrow=c(2,2), mar=c(4, 4, 2, 1))
+    p1 <- lapply(chains(hdpres2), plot_lik, bty="L")
+    p2 <- lapply(chains(hdpres2), plot_numcluster, bty="L")
+    p3 <- lapply(chains(hdpres2), plot_data_assigned, bty="L")
+```
+
+### iv. Component count - n5
+```{r}
+plot_comp_size(hdpres2, bty="L", lab=c(3, 5, 7))
+```
+
+
+### v. Process HDP results and assign known signatures
+Known signatures are assigned if cosine similarity is greater than 0.95
+```{r}
+ hdp2 <- extract_details_from_hdpres(
+   res = hdpres2,
+   priorsigs = pcawg,
+   mutcount = mc2, threshold = 0.95
+ )
+```
+
+
+## c. Check reconstruction error
+Per Sample reconstruction error. Highlight samples with counts>200 that have reconstruction cosine similarity < 0.9:
+```{r}
+df <- data.frame(counts = colSums(mc2), reconstruction_csm = hdp2$sample_csm, label = colnames(mc2))
+ggplot(df, aes(x = counts, y = reconstruction_csm, label = label)) +
+  geom_point() +
+  geom_text_repel(data = df %>% filter(counts > 200 & reconstruction_csm < 0.9)) +
+  geom_point(data = df %>% filter(counts > 200 & reconstruction_csm < 0.9), col = "red") +
+  ylim(c(0.7, 1)) + geom_vline(xintercept = 200, lty = 3)
+```
+
+### i. PD6577_cl1 - No driver TN-ET
+```{r}
+clone_driver.key.n104 %>%  filter(cluster_name == "PD6577_cl1")
+```
+
+```{r}
+plot_compare_profiles(profile1 = hdp2$mutcount[,"PD6577_cl1"], profile2 = hdp2$reconstruction["PD6577_cl1", ])
+```
+
+
+# 2. Results
+## a. Extracted signatures
+### i. Plot components
+```{r, fig.width= 7, fig.height = 8}
+plot_96_profile(hdp2$signatures, condensed = T)
+```
+
+### ii. Component similarity to COSMIC 
+```{r dev.args=list(pointsize=12),fig.height=6,fig.width=6}
+csm <- cos_sim_matrix(hdp2$signature, pcawg)
+csm2 <- csm[, apply(csm, 2, max) > 0.7]
+
+plot_cosine_heatmap(csm2, cluster_rows = TRUE, cluster_cols = TRUE, plot_values = TRUE)
+```
+
+### iii. Rename Novel signatures
+```{r, fig.width= 7, fig.height = 8}
+signatures.mat <- hdp2$signatures
+
+sig.rename.vec <- c("SBSblood" ="SBSblood", "SBS1" = "SBS1",  "N1" = "SBS-B", "N2" = "SBS-A", "N3" = "SBS-C")
+
+colnames(signatures.mat) <- sig.rename.vec[colnames(signatures.mat) ]
+
+plot_96_profile(signatures.mat[,c("SBSblood", "SBS1",  "SBS-A", "SBS-B", "SBS-C")], condensed = T)
+```
+
+
+## d. Signature contribution 
+### i. All clones n=64
+```{r}
+hdp2.tb <- contibutionPlot.data(hdp = hdp2, clone.key = clone_driver.key.n104)
+dim(hdp2.tb)
+```
+
+
+#### 1) Rename and group sigs
+Signature attributions where the lower bound = 0 are categorised as unassigned
+```{r}
+sig.col.vec <- rev(c(unassigned = "black", `SBS-C` = "#5A96BF",  `SBS-B` ="#995763", `SBS-A` ="#50A382", SBS1 = "#99968C",  SBSblood = "#D3927C"))
+
+hdp2.tb.anno.df <-
+  hdp2.tb %>%
+  mutate(Signature.orig = Signature) %>%
+  mutate(Signature = factor(case_when(
+    Signature.orig == "N1" & Contribution_lb95 > 0 ~ "SBS-B",
+    Signature.orig == "N2" & Contribution_lb95 > 0 ~ "SBS-A",
+    Signature.orig == "N3" & Contribution_lb95 > 0 ~ "SBS-C",
+    Contribution_lb95 == 0 ~ "unassigned", TRUE ~ Signature.orig
+  ), levels = names(sig.col.vec))) %>% 
+  mutate(Sig_type = case_when(Signature  %in%  c("SBS1", "SBSblood") ~ "Endogenous", TRUE ~ "Novel"))
+```
+
+
+#### 2) Relative and absolute Barplot
+```{r dev.args=list(pointsize=8),fig.height=12,fig.width=12}
+n64.con_barplot <-
+  contibutionPlot.con_plot(tb = hdp2.tb.anno.df, facet = "category_label") + scale_fill_manual(values = sig.col.vec) + scale_colour_manual(values = sig.col.vec)
+n64.abs_barplot <-
+  contibutionPlot.abs_plot(tb = hdp2.tb.anno.df, facet = "category_label") + scale_fill_manual(values = sig.col.vec) + scale_colour_manual(values = sig.col.vec)
+
+
+n64.con_barplot +
+  plot_spacer() +
+  n64.abs_barplot +
+  plot_layout(widths = c(0.4, 0.0005, 0.6), guides = "collect")
+```
+
+#### 3) Clone level signature relative contributions
+Signature attributions where the lower bound = 0 are not plotted
+```{r, fig.height=5,fig.width=4}
+
+  hdp2.tb.anno.df %>%
+  filter(Contribution_lb95 > 0) %>%
+  ggplot(aes(x = Signature, y = Contribution, color = Signature)) +
+  ggbeeswarm::geom_quasirandom(size = 1.5) +
+  facet_grid(. ~ Sig_type, scales = "free_x", space = "free_x") +
+  scale_colour_manual(values = sig.col.vec) +
+  theme_bw() +
+  labs(y = "Relative contribution", x = NULL) +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank(),
+    strip.text = element_blank()
+  )
+```
+
+
+### ii. Novel signature high burden clones n=6
+#### 1) Select high exposure samples (> 0.20) and untreated patient clones (PD9478) n8
+```{r}
+outlier.exposure.list <-
+  list(
+    "Aza" = rownames(hdp2$contr)[hdp2$contr[, "N2"] > 0.2],
+    "Hydroxycarbamide" = rownames(hdp2$contr)[hdp2$contr[, "N1"] > 0.2],
+    "SBS-C" = rownames(hdp2$contr)[hdp2$contr[, "N3"] > 0.2],
+    "Untreated" = grep("PD9478", colnames(mc2), value = T)
+  )
+
+outlier.exposure.list
+```
+
+##### a) Plot spectra
+Plot clone level spectra of outlier and untreated n8
+```{r fig.height = 8, fig.width=6}
+plot_96_profile(mc2[,unlist(outlier.exposure.list)], ymax = 0.1)
+```
+
+##### b) Subset outlier/untreated clones 
+```{r}
+outlier.tb <-
+  right_join(
+    hdp2.tb.anno.df,
+    unlist(lapply(names(outlier.exposure.list), function(x) {
+      d <-
+        outlier.exposure.list[[x]]
+      names(d) <-
+        rep(x, length(d))
+      d
+    })) %>% enframe(name = "Group", value = "Sample")
+  )
+
+outlier.tb %<>% mutate(Group = factor(as.character(Group),
+  levels = names(outlier.exposure.list)
+))
+
+outlier.tb %<>% mutate(Clone_abv = factor(as.character(Clone_abv),
+  levels = rev(c(
+    "PD4007_CSF3R/ATRX/PHF6",
+    "PD7281_No driver", 
+    "PD6607_TP53/RUNX1/EZH2/ZRSR2/ETV6", 
+    "PD6623_TP53/17p/chromoplexy", 
+    "PD6607_RUNX1/13p", 
+    "PD4947_ASXL1/9pLOH", 
+    "PD9478_DNMT3A", 
+    "PD9478_JAK2exon12"
+  ))
+))
+
+outlier.tb %>%  select(Patient, category_label, Clone_abv) %>% distinct()
+```
+
+#### 2) Relative and absolute Barplot
+```{r fig.height=4,fig.width=8}
+outlier.con_barplot <-
+  contibutionPlot.con_plot(tb = outlier.tb, facet = "Group") + scale_fill_manual(values = sig.col.vec) + scale_colour_manual(values = sig.col.vec)
+outlier.abs_barplot <-
+  contibutionPlot.abs_plot(tb = outlier.tb, facet = "Group") + scale_fill_manual(values = sig.col.vec) + scale_colour_manual(values = sig.col.vec)
+
+outlier.con_barplot +
+  plot_spacer() +
+  outlier.abs_barplot +
+  plot_layout(widths = c(0.4, 0.0005, 0.6), guides = "collect")
+```
+
+
+# 3. SessionInfo
+```{r}
+sessionInfo()
+```
+
+
+
+
