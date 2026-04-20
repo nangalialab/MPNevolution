@@ -1,0 +1,10 @@
+source("load_and_annotate_tree.R")
+source("revised_sigs.R")
+#PDD=do.call("c",lapply(c("PDD_A","PDD_B","PDD_SCC_TN"),function(x) readRDS(sprintf("../cache/%s.RDS",x)))
+#mc=get_cohort_count_matrix(PDD)
+mc=readRDS("../cache/mut_matrix_counts_TN_ET_SCC_MPN_all.RDS")
+mc=mc[,colSums(mc)>=40]
+SEED=as.integer(Sys.time())
+set.seed(SEED)
+res=runHDP_denovo(mc)
+saveRDS(res,sprintf("../data/HDP_TN_ET_SCC_MPN_all_min40_250_per_chain_seed%s.RDS",SEED))

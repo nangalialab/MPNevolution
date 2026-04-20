@@ -1,0 +1,449 @@
+---
+title: "MPN + Triple Negative + ET + SCC colonies: Joint Signature Analysis"
+author: "Nick Williams"
+date: "`r Sys.Date()`"
+params:
+  nchain: "250"
+  plottrees: true        
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+    code_folding: hide
+    fig_width: 12
+    fig_height: 8
+---
+
+<style>
+.tocify { width: 180px; }
+.tocify-header { font-size: 12px; }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 8,fig.path = sprintf("figures_%sc/",params$nchain),dev=c("png","pdf")
+)
+
+options(dplyr.summarise.inform = FALSE)
+plot_cosine_heatmap_modified=function (cos_sim_matrix, col_order = NA, row_order = NA, cluster_rows = TRUE, 
+    cluster_cols = FALSE, method = "complete", plot_values = FALSE,cex=3,textcolor="black") 
+{
+    ##.is.na=MutationalPatterns:::MutationalPatterns:::.is_na
+    if (!inherits(cos_sim_matrix, "matrix")) {
+        stop("cos_sim_matrix must be a matrix")
+    }
+    if (length(colnames(cos_sim_matrix)) == 0) {
+        stop("cos_sim_matrix is missing colnames")
+    }
+    if (length(rownames(cos_sim_matrix)) == 0) {
+        stop("cos_sim_matrix is missing rownames")
+    }
+    Cosine.sim <- Signature <- Sample <- x <- y <- xend <- yend <- NULL
+    if (!MutationalPatterns:::.is_na(row_order) & cluster_rows == TRUE) {
+        stop("row_order can only be provided when cluster_rows is FALSE", 
+            call. = FALSE)
+    }
+    else if (!MutationalPatterns:::.is_na(row_order)) {
+        if (!inherits(row_order, "character")) {
+            stop("row_order must be a character vector", call. = FALSE)
+        }
+        if (length(row_order) != nrow(cos_sim_matrix)) {
+            stop("row_order must have the same length as the number of\n          samples in the explained matrix", 
+                call. = FALSE)
+        }
+    }
+    else if (cluster_rows == TRUE) {
+        hc.sample <- hclust(dist(cos_sim_matrix), method = method)
+        row_order <- rownames(cos_sim_matrix)[hc.sample$order]
+        dhc <- as.dendrogram(hc.sample)
+        ddata <- ggdendro::dendro_data(dhc, type = "rectangle")
+        dendrogram_rows <- ggplot(ggdendro::segment(ddata)) + 
+            geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+            coord_flip() + scale_y_reverse(expand = c(0.2, 0)) + 
+            ggdendro::theme_dendro()
+    }
+    else {
+        row_order <- rownames(cos_sim_matrix)
+    }
+    if (!MutationalPatterns:::.is_na(col_order) & cluster_cols == TRUE) {
+        stop("col_order can only be provided when cluster_cols is FALSE", 
+            call. = FALSE)
+    }
+    else if (!MutationalPatterns:::.is_na(col_order)) {
+        if (!inherits(col_order, "character")) {
+            stop("col_order must be a character vector", call. = FALSE)
+        }
+        if (length(col_order) != ncol(cos_sim_matrix)) {
+            stop("col_order must have the same length as the number of \n          signatures in the explained matrix", 
+                call. = FALSE)
+        }
+    }
+    else if (cluster_cols == TRUE) {
+        hc.sample2 <- cos_sim_matrix %>% t() %>% dist() %>% hclust(method = method)
+        col_order <- colnames(cos_sim_matrix)[hc.sample2$order]
+        dhc <- as.dendrogram(hc.sample2)
+        ddata <- ggdendro::dendro_data(dhc, type = "rectangle")
+        dendrogram_cols <- ggplot(ggdendro::segment(ddata)) + 
+            geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+            ggdendro::theme_dendro() + scale_y_continuous(expand = c(0.2, 
+            0))
+    }
+    else {
+        col_order <- colnames(cos_sim_matrix)
+    }
+    cos_sim_matrix.m <- cos_sim_matrix %>% as.data.frame() %>% 
+        tibble::rownames_to_column("Sample") %>% tidyr::pivot_longer(-Sample, 
+        names_to = "Signature", values_to = "Cosine.sim") %>% 
+        dplyr::mutate(Signature = factor(Signature, levels = col_order), 
+            Sample = factor(Sample, levels = row_order))
+    heatmap <- ggplot(cos_sim_matrix.m, aes(x = Signature, y = Sample, 
+        fill = Cosine.sim, order = Sample)) + geom_raster() + 
+        scale_fill_distiller(palette = "YlGnBu", direction = 1, 
+            name = "Cosine \nsimilarity", limits = c(0, 1.000000001)) + 
+        theme_bw() + theme(axis.text.x = element_text(angle = 90, 
+        hjust = 1, vjust = 0.5, size = 8), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()) + labs(x = NULL, 
+        y = NULL)
+    if (plot_values == TRUE) {
+        heatmap <- heatmap + geom_label(aes(label = round(Cosine.sim, 
+            2)), size = cex,color=textcolor,fill="white")
+    }
+    if (cluster_rows == TRUE & cluster_cols == TRUE) {
+        empty_fig <- ggplot() + theme_void()
+        plot_final <- cowplot::plot_grid(empty_fig, dendrogram_cols, 
+            dendrogram_rows, heatmap, align = "hv", axis = "tblr", 
+            rel_widths = c(0.3, 1), rel_heights = c(0.3, 1))
+    }
+    else if (cluster_rows == TRUE & cluster_cols == FALSE) {
+        plot_final <- cowplot::plot_grid(dendrogram_rows, heatmap, 
+            align = "h", rel_widths = c(0.3, 1))
+    }
+    else if (cluster_rows == FALSE & cluster_cols == TRUE) {
+        plot_final <- cowplot::plot_grid(dendrogram_cols, heatmap, 
+            align = "v", rel_heights = c(0.3, 1)) + ylim(rev(levels(factor(cos_sim_matrix.m$Sample))))
+    }
+    else {
+        plot_final <- heatmap + ylim(rev(levels(factor(cos_sim_matrix.m$Sample))))
+    }
+    return(plot_final)
+}
+
+```
+
+
+
+```{r}
+source("load_and_annotate_tree.R")
+source("revised_sigs.R")
+library("ggpubr")
+library("patchwork")
+theme_set(theme_bw())
+```
+
+```{r}
+## Manual mappings and colour schemes
+yl=RColorBrewer::brewer.pal(9,"YlOrRd")
+bg=RColorBrewer::brewer.pal(11,"BrBG")
+SBS1_color="red"
+SBS19_color=yl[5]
+SBSBlood_color=yl[3]
+SBS40_color=yl[4]
+
+SBSHydroxy_color="black"
+SBSPipo_color="purple"
+## manual mapping
+namemap=list("250"=list(names=c("N1:SBSBlood","N2:SBS1","N3:HydroxyC?","N4:Pipobroman?","N5:SBS40?"),
+                        colors=c(SBSBlood_color,SBS1_color,SBSHydroxy_color,SBSPipo_color,SBS40_color),
+                        order=c(2,1,5,3,4),
+                        focal=c(1,2,3,5)
+                        ),
+             "1000"=list(names=c("N1:SBSBlood","N2:SBS1","N3:SBS19?","N4:HydroxyC?","N5:Pipobroman?","N5:SBS40?"),
+                        colors=c(SBSBlood_color,SBS1_color,SBS19_color,SBSHydroxy_color,SBSPipo_color,SBS40_color),
+                        order=c(2,1,3,6,4,5),
+                        focal=c(1,2,3,4,6)
+                        )
+)
+```
+
+### Retrieve HDP analysis and COSMIC signatures + SBSblood
+
+Here we retrieve our trees with assigned mutations. We then treat each branch as a sample, except on a per donor basis we group into a single "sample" a) early branches that end before 50 mutations molecular time and separately b) clonally related short branches <40 mutations that  
+```{r}
+## Load in our trees with assigned mutations
+PDD=do.call("c",lapply(c("PDD_A","PDD_B","PDD_SCC_TN"),
+                       function(x) readRDS(sprintf("../cache/%s.RDS",x)))
+            )
+## Get the 96-trinuclotide counts
+MC_FILE="../cache/mut_matrix_counts_TN_ET_SCC_MPN_all.RDS"
+if(file.exists(MC_FILE)){
+  mc=readRDS(MC_FILE)
+}else{
+  mc=get_cohort_count_matrix(PDD)
+}
+mc=mc[,colSums(mc)>=40]
+#res=runHDP_denovo(mc)
+NCHAIN=as.character(params$nchain)
+hydroxyc_sig=grep("HydroxyC",namemap[[NCHAIN]]$names,value=TRUE)
+#rdsfile=sprintf("../data/HDP_TN_ET_SCC_MPN_all_min40_%s_per_chain_seed12345.RDS",NCHAIN)
+rdsfile=sprintf("../data/HDP_counts_TN_ET_SCC_MPN_all_min40_%s_per_chain.RDS",NCHAIN)
+res=readRDS(rdsfile)
+pcawg=get_extended_pcawg()
+hdpinfo=extract_details_from_hdpres(res,
+                                    priorsigs = pcawg,
+                                    mutcount = mc,
+                                    threshold = 0.999 
+                                    )
+```
+
+
+
+## De-novo Signatures
+
+```{r plotunlabelledsigs}
+plot_96_profile(hdpinfo$signatures,condensed=TRUE)
+```
+
+### Cosine similarities
+
+Here we show all pcawg signatures with a cosine similarity greater than 0.7 with at least one of our de-novo signatures
+
+```{r plotcsmpcawg}
+csm=cos_sim_matrix(hdpinfo$signatures,pcawg)
+csm=csm[,which(apply(csm,2,max)>0.7)]
+plot_cosine_heatmap_modified(csm,cluster_cols = TRUE,plot_values = TRUE,textcolor = "black",cex = 2.5)
+```
+
+### Cosine similarities with relabelled signature - just relabelling
+
+Based on this we can post-hoc label our signatures. Anything with cosine similarity > 0.9 is definitively labelled. Others are suggested with a "?" suffix. 
+
+```{r plotlabelledsigs}
+reference=hdpinfo$signatures
+colnames(reference)=namemap[[NCHAIN]]$names
+hdpinfo=extract_details_from_hdpres(res,priorsigs = reference,mutcount = mc,threshold = 0.90)
+plot_96_profile(hdpinfo$signatures,condensed=TRUE)
+```
+
+### Comparison with Mitchell et all Chemotherapy paper signatures
+
+Compare with data downloaded from "The long-term effects of chemotherapy on normal blood cells":
+
+```{r plotcsmpchemo}
+chemo=read.table("../data/chemo_sigs.txt",head=T,stringsAsFactors = FALSE)
+csm=cos_sim_matrix(hdpinfo$signatures,chemo[match(rownames(hdpinfo$signatures),chemo$Type),-1]  %>% as.matrix())
+##csm=csm[,which(apply(csm,2,max)>0.7)]
+plot_cosine_heatmap_modified(csm,cluster_cols = TRUE,plot_values = TRUE,textcolor = "black",cex = 2.5)
+```
+
+### Comparison with Discovery signatures (see "bulk_signature_analysis")
+
+Note that in the discovery dataset SBS-B is identified as the Hydroxycarbomide signature
+
+```{r plotcsmpdisco}
+csm=cos_sim_matrix(hdpinfo$signatures,readRDS("../bulk_signature_analysis/bulk_signatures.RDS"))
+##csm=csm[,which(apply(csm,2,max)>0.7)]
+plot_cosine_heatmap_modified(csm,cluster_cols = TRUE,plot_values = TRUE,textcolor = "black",cex = 2.5)
+```
+
+## Contributions across the cohort
+
+```{r}
+### Do donor mapping
+donors=names(PDD)
+donor_map=sapply(donors,function(donor) which(grepl(sprintf("^%s",donor),colnames(mc))),USE.NAMES = TRUE)
+don=rep("",ncol(mc))
+for(donor in names(donor_map)){
+  don[donor_map[[donor]]]=donor
+}
+## Construct data.frame with contributions for downstream plotting.
+df=data.frame(ID=colnames(mc),donor=don)
+df=cbind(df,as.data.frame(hdpinfo$contr))
+DONORS_HC=c("PD5179","PD6646","PD4781","PD6634","PD6629","PD5117","PD5147","PD63423","PD6577","PD5182")
+df=df %>% mutate(HC=ifelse(donor %in% DONORS_HC,"Hydroxycarbomide Exposed","Not HC Exposed"))
+df=df %>% pivot_longer(cols=colnames(hdpinfo$contr),values_to = "contribution",names_to = "signature") %>% group_by(donor,signature,HC) %>% summarise(contribution=mean(contribution))
+```
+
+```{r branchcontr}
+RLE=rle(don)
+hdptmp=hdpinfo
+rownames(hdptmp$contr)=rep("",nrow(hdptmp$contr))
+rownames(hdptmp$contr)[cumsum(RLE$lengths)-diff(cumsum(c(0,RLE$lengths)))%/%2]=RLE$values
+tmp=with(hdptmp,expanded_plot(
+  t(contr),
+  "Signature contributions (HDP)",
+  lb=t(contr_lb95),ub=t(contr_ub95),
+  b.add.verticals = FALSE))
+abline(v=c(0,cumsum(RLE$lengths)))
+```
+
+## Compare Mean Branch Signature Contribtions
+
+```{r branchcompare,fig.width=6,fig.height=6}
+df %>% filter(grepl("HydroxyC",signature)) %>% ggplot(aes(x=HC,y=contribution,group=HC))+geom_boxplot(outlier.shape = NA)+geom_jitter(height = 0,width=0.1,size=3,aes(col=donor))+stat_compare_means(comparisons=list(unique(df$HC)),method="wilcox.test")+theme_bw()+xlab("Hydroxycarbomide Status")+ylab("Mean Signature Contribution (Across Branches)")+scale_y_continuous(labels=scales::percent,limits = c(0,0.2))
+```
+
+## Load up data the clinical data
+
+```{r}
+hc=read.table("../data/HC_exposure_table_updated_inferred.txt",sep="\t",head=TRUE)
+print(hc)
+```
+
+### Trees
+```{r trees}
+if(params$plottrees){
+colorscheme=data.frame(SIG=colnames(hdpinfo$signatures),
+                       COL=namemap[[NCHAIN]]$color)
+colorscheme=colorscheme[namemap[[NCHAIN]]$order,]
+colorscheme1=colorscheme %>% 
+  filter(SIG %in%colnames(hdpinfo$signatures)[namemap[[NCHAIN]]$focal])
+
+priorsigs=hdpinfo$signatures[,colorscheme1$SIG]
+for(PD in PDD[c("PD5182","PD7271","PD5163","PD5847","PD5179","PD6634","PD9478","PD6629","PD6646","PD5117","PD4781")]){
+  PD=add_sig_to_pdx(PD,prior=priorsigs,minmut=10,method = "MP")
+  tree=plot_tree(PD$fit$nb_tree$altmodel$ultratree,cex.label = 0,left.margin.prop=0.14)
+  title(PD$patient);
+  tree=plot_signature_annotated_tree(tree,PD$pdx$dat,colorscheme1,maxlen=1e6,b.include.csm.text=FALSE)
+}
+for(PD in PDD[c("PD63423","PD6577","PD54831","PD54832")]){
+  PD=add_sig_to_pdx(PD,prior=priorsigs,minmut=10,method = "MP")
+  tree=plot_tree(PD$pdx$tree_ml,cex.label = 0,left.margin.prop=0.14)
+  title(PD$patient);
+  tree=plot_signature_annotated_tree(tree,PD$pdx$dat,colorscheme1,maxlen=1e6,b.include.csm.text=FALSE)
+}
+priorsigs=hdpinfo$signatures[,colorscheme$SIG]
+for(PD in PDD[c("PD5147")]){
+  PD=add_sig_to_pdx(PD,prior=priorsigs,minmut=10,method = "MP")
+  tree=plot_tree(PD$fit$nb_tree$altmodel$ultratree,cex.label = 0,left.margin.prop=0.14)
+  title(PD$patient);
+  tree=plot_signature_annotated_tree(tree,PD$pdx$dat,colorscheme,maxlen=1e6,b.include.csm.text=FALSE)
+}
+}
+```
+
+### Sample Level Analysis
+
+```{r}
+mm=readRDS("/lustre/scratch126/casm/teams/team273/projects/MPN_genomes/MPN_PDD_Files/PDD_TN_ET_SCC_MPN_all_sample_level_mut_matrix.RDS")
+fts=fit_to_signatures(mm,hdpinfo$signatures)
+alldf=do.call("rbind",lapply(PDD,function(PD) PD$pdx$agedf %>% 
+                                 filter(age_at_sample_exact>0) %>% 
+                                 mutate(donor=PD$patient) %>% 
+                                 dplyr::select(donor,age_at_sample_exact,tip.label) %>%
+                                 inner_join(PD$pdx$cfg,by=c("tip.label"="SHORT_LABEL"))
+)
+)
+alldf=alldf %>% mutate(donor=ifelse(donor=="PD63423ac","PD63423",donor))
+alldf=alldf %>% mutate(snvcount=colSums(mm[,alldf$LABEL]))
+alldf=alldf %>% cbind(t(fts$contribution[,alldf$LABEL]))
+alldf=alldf %>% dplyr::arrange(donor,age_at_sample_exact,.data[[hydroxyc_sig]]) %>% mutate(age=round(age_at_sample_exact,0)) %>% 
+    mutate(key=sprintf("%s:%s",donor,age))
+```
+
+### Ordered by weight
+
+```{r hcaverages_by_weight, fig.width=10,fig.height=5}
+hotspots=c("T[T>A]A","T[T>A]T","T[T>G]A","T[T>G]T")
+alldf$hotspot=colSums(mm[hotspots,alldf$LABEL])
+hcmeans=alldf %>% mutate(age=round(age_at_sample_exact,0)) %>% group_by(donor,age) %>% summarise(N=mean(.data[[hydroxyc_sig]]),tot=mean(snvcount),meanprop=mean(.data[[hydroxyc_sig]]/snvcount),meanhotspot=mean(hotspot),meanprophotspot=mean(hotspot/snvcount)) %>% as.data.frame() %>% left_join(hc %>% dplyr::select(donor,age,HC_years_lb,HC_years_ub,HC_years,HC_dose_kg_lb,HC_dose_kg_ub,HC_dose_kg))
+hclong=hcmeans %>% mutate(Other_count=tot-N) %>% mutate(HC_count=N) %>% dplyr::select(donor,age,HC_years_lb,HC_years_ub,HC_years,HC_dose_kg_lb,HC_dose_kg_ub,HC_dose_kg,HC_count,Other_count,meanhotspot,meanprophotspot) %>% pivot_longer(cols = c("HC_count","Other_count"),names_to = "Signature",values_to = "Count")
+
+hclong_oldest_only = hclong %>% inner_join(hclong %>% group_by(donor) %>% summarise(age=max(age)))
+hc2=hclong_oldest_only %>% filter(Signature=="HC_count")
+hcf_by_kg=hclong_oldest_only %>% mutate(donor=factor(donor,levels=hc2$donor[order(hc2$HC_dose_kg,hc2$donor)]))
+hcf_by_duration=hclong_oldest_only %>% mutate(donor=factor(donor,levels=hc2$donor[order(hc2$HC_years,hc2$donor)]))
+
+g2=hcf_by_kg %>% filter(Signature=="HC_count") %>% ggplot(aes(x=donor,y=HC_dose_kg,ymin=HC_dose_kg_ub,ymax=HC_dose_kg_lb,fill=Signature,group=age))+geom_bar(position="stack", stat="identity")+geom_errorbar()+theme_bw()+theme(axis.text.x=element_text(angle=90,hjust=1))+ylab("Reported HC Exposure (kg)")+xlab("")
+g1=hclong_oldest_only %>% mutate(donor=factor(donor,levels=hc2$donor[order(hc2$HC_dose_kg,hc2$donor)])) %>% ggplot(aes(x=donor,y=Count,fill=Signature,group=age))+geom_bar(position="stack", stat="identity")+theme_bw()+theme(axis.text.x=element_text(angle=90,hjust=1))+ylab("SNV Mutation Count")+xlab("")
+g2=g2+theme(legend.position = "none")
+g1+g2
+```
+
+## Ordered by duration
+
+```{r hcaverages_byduration, fig.width=10,fig.height=5}
+g2=hcf_by_duration %>% filter(Signature=="HC_count") %>% ggplot(aes(x=donor,y=HC_years,ymin=HC_years_lb,ymax=HC_years_ub,fill=Signature,group=age))+geom_bar(position="stack", stat="identity")+geom_errorbar()+theme_bw()+theme(axis.text.x=element_text(angle=90,hjust=1))+ylab("Reported HC Exposure (Years)")+xlab("")
+g1=hclong_oldest_only %>% mutate(donor=factor(donor,levels=hc2$donor[order(hc2$HC_years,hc2$donor)])) %>% ggplot(aes(x=donor,y=Count,fill=Signature,group=age))+geom_bar(position="stack", stat="identity")+theme_bw()+theme(axis.text.x=element_text(angle=90,hjust=1))+ylab("SNV Mutation Count")+xlab("")
+g2=g2+theme(legend.position = "none")
+g1+g2
+```
+
+## Correlation values
+
+```{r}
+tmp=hcf_by_kg %>% filter(Signature=="HC_count")
+print(cor.test(tmp$HC_years,tmp$Count,method="pearson"))
+print(cor.test(tmp$HC_dose_kg,tmp$Count,method="pearson"))
+print(cor.test(tmp$HC_years,tmp$meanprophotspot,method="pearson"))
+print(cor.test(tmp$HC_dose_kg,tmp$meanprophotspot,method="pearson"))
+
+```
+
+## Additional plots - Donor Level
+
+```{r hccounts, fig.width=10,fig.height=5}
+g1=tmp %>% ggplot(aes(x=HC_dose_kg,xmin=HC_dose_kg_lb,xmax=HC_dose_kg_ub,y=`Count`))+geom_errorbarh()+geom_point()+ylab("HC Count")+xlab("HC Exposure (kg)")
+g2=tmp %>% ggplot(aes(x=HC_years,xmin=HC_years_lb,xmax=HC_years_ub,y=`Count`))+geom_errorbarh()+geom_point()+ylab("HC Count")+xlab("HC Exposure (Years)")
+g1+g2+plot_annotation("Count of HC attributed mutations")
+g1=tmp %>% ggplot(aes(x=HC_dose_kg,xmin=HC_dose_kg_lb,xmax=HC_dose_kg_ub,y=meanhotspot))+geom_errorbarh()+geom_point()+ylab("Hotspot Count")+xlab("HC Exposure (kg)")
+g2=tmp %>% ggplot(aes(x=HC_years,xmin=HC_years_lb,xmax=HC_years_ub,y=meanhotspot))+geom_errorbarh()+geom_point()+ylab("Hotspot Count")+xlab("HC Exposure (Years)")
+g1+g2+plot_annotation(sprintf("Count of HC hotspot mutations: %s",paste(c("T[T>A]A","T[T>A]T","T[T>G]A","T[T>G]T"),collapse=", ")))
+```
+
+
+## PD5182 sample level tests
+
+```{r fig.width=10,fig.height=5}
+set.seed(123)
+nh=nodeHeights(PDD$PD5182$pdx$tree_ml)
+clades=PDD$PD5182$pdx$tree_ml$edge[which(nh[,1]>50),2]
+unrelated_samples=sapply(clades,function(node) sample(get_samples_in_clade(node,PDD$PD5182$pdx$tree_ml),size = 1))
+tmp=alldf %>% filter(donor=="PD5182") %>% filter(tip.label %in% unrelated_samples)
+mm2=mm[,tmp$LABEL]
+fts2=fit_to_signatures(mm2,hdpinfo$signatures[,!grepl("Pipobroman",colnames(hdpinfo$signatures))])
+sigcr=as.data.frame(t(fts2$contribution)) %>% rownames_to_column("LABEL")
+sigcr$count=colSums(mm2[,sigcr$LABEL])
+tmp=alldf %>% filter(donor=="PD5182") %>% filter(tip.label %in% unrelated_samples) %>% dplyr::select(LABEL,age) %>% left_join(sigcr)
+g1=tmp %>%
+mutate(age = as.character(age)) %>%
+ggplot(aes(x = age, y = .data[[hydroxyc_sig]])) +
+geom_boxplot() +
+geom_point() +
+stat_compare_means(comparisons = list(c("33", "47"), c("47", "53"), c("33", "53")),
+method = "wilcox.test")+ylab("HC Counts")
+g2=tmp %>%
+mutate(age = as.character(age)) %>%
+ggplot(aes(x = age, y = .data[[hydroxyc_sig]] / count)) +
+geom_boxplot() +
+geom_point() +
+stat_compare_means(comparisons = list(c("33", "47"), c("47", "53"), c("33", "53")),
+method = "wilcox.test")+ylab("HC Counts/# SNV Count")
+g1+g2+plot_annotation('PD5182:HC Signature Attribution of unrelated* samples')
+g1b=tmp %>%
+mutate(group = ifelse(age %in% c(33, 47), "Pre-HC  (Age 33 and 47)", "HC (Age 53)")) %>% mutate(group=factor(group,levels=c("Pre-HC  (Age 33 and 47)", "HC (Age 53)"))) %>%
+ggplot(aes(x = group, y = .data[[hydroxyc_sig]])) +
+geom_boxplot() +
+geom_point() +
+stat_compare_means(comparisons = list(c("Pre-HC  (Age 33 and 47)", "HC (Age 53)")),
+method = "wilcox.test")+xlab("")+ylab("HC Count")
+g2b=tmp %>%
+mutate(group = ifelse(age %in% c(33, 47), "Pre-HC  (Age 33 and 47)", "HC (Age 53)")) %>% mutate(group=factor(group,levels=c("Pre-HC  (Age 33 and 47)", "HC (Age 53)"))) %>%
+ggplot(aes(x = group, y = .data[[hydroxyc_sig]] / count)) +
+geom_boxplot() +
+geom_point() +
+stat_compare_means(comparisons = list(c("Pre-HC  (Age 33 and 47)", "HC (Age 53)")),
+method = "wilcox.test")+xlab("")+ylab("HC Count/#SNV Count")
+g1b+g2b+plot_annotation('PD5182:HC Signature Attribution of unrelated* samples')
+```
+
+## SessionInfo
+
+```{r}
+sessionInfo()
+```
