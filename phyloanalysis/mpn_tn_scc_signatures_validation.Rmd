@@ -192,7 +192,13 @@ NCHAIN=as.character(params$nchain)
 hydroxyc_sig=grep("HydroxyC",namemap[[NCHAIN]]$names,value=TRUE)
 #rdsfile=sprintf("../data/HDP_TN_ET_SCC_MPN_all_min40_%s_per_chain_seed12345.RDS",NCHAIN)
 rdsfile=sprintf("../data/HDP_counts_TN_ET_SCC_MPN_all_min40_%s_per_chain.RDS",NCHAIN)
-res=readRDS(rdsfile)
+if(file.exists(rdsfile)){
+  res=readRDS(rdsfile)
+}else{
+  SEED=round(as.numeric(Sys.time()))
+  cat("seed=",SEED,"\n")
+  res=runHDP_denovo(mc,burnin = 20000,n_per_chain = as.integer(NCHAIN),seed = SEED)
+}
 pcawg=get_extended_pcawg()
 hdpinfo=extract_details_from_hdpres(res,
                                     priorsigs = pcawg,
