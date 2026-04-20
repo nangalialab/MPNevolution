@@ -1,0 +1,22 @@
+"donor"	"N"	"Cohort"	"HC_dose_kg_lb"	"HC_dose_kg_ub"	"HC_years_lb"	"HC_years_ub"	"age"	"HC_years"	"HC_dose_kg"
+"PD4781"	39	"Willams et al. 2022"	1.5	1.5	11	11	84	11	1.5
+"PD4781"	22	"Willams et al. 2022"	1.65	1.65	14	14	86	14	1.65
+"PD5117"	88	"Willams et al. 2022"	1.8	3.5	8	17	82	12.5	2.65
+"PD5147"	66	"Willams et al. 2022"	1.75	1.75	9	9	91	9	1.75
+"PD5163"	70	"Willams et al. 2022"	0	0	0	0	37	0	0
+"PD5179"	92	"Willams et al. 2022"	2	2	6	14	50	10	2
+"PD5182"	32	"Willams et al. 2022"	0	0	0	0	33	0	0
+"PD5182"	35	"Willams et al. 2022"	0	0	0	0	47	0	0
+"PD5182"	93	"Willams et al. 2022"	1	1	3	3	53	3	1
+"PD54831"	48	"TN_ET"	0	0	0	0	31	0	0
+"PD54832"	49	"TN_ET"	0	0	0	0	51	0	0
+"PD5847"	96	"Willams et al. 2022"	0	0	0	0	45	0	0
+"PD63423"	17	"ET_SCC"	3.51130465468355	8.15051124238235	23	23	67	23	5.83090794853295
+"PD6577"	42	"TN_ET"	2	2	7	7	70	7	2
+"PD6629"	32	"Willams et al. 2022"	0.25	0.25	1	1	60	1	0.25
+"PD6629"	27	"Willams et al. 2022"	0.75	0.75	3	3	62	3	0.75
+"PD6634"	36	"Willams et al. 2022"	5.5	5.5	11	11	60	11	5.5
+"PD6646"	90	"Willams et al. 2022"	1.5	1.5	6	6	81	6	1.5
+"PD6646"	27	"Willams et al. 2022"	2.5	2.5	8	8	84	8	2.5
+"PD7271"	88	"Willams et al. 2022"	0	0	0	0	23	0	0
+"PD9478"	80	"Willams et al. 2022"	0	2.48059037811637	0	7	68	3.5	1.24029518905818
